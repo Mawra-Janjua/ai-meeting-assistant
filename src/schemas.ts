@@ -37,7 +37,17 @@ export const FollowUpSchema = z.object({ subject: z.string(), body: z.string() }
 export type FollowUp = z.infer<typeof FollowUpSchema>;
 
 export type VerifiedDecision = { decision: string; line: number; quote: string };
-export type VerifiedAction = { task: string; owner: string | null; deadline: string | null; line: number; quote: string; notes: string[] };
+export type VerifiedAction = {
+  task: string;
+  owner: string | null;
+  /** Deadline exactly as spoken ("by Friday"), or null. */
+  deadline: string | null;
+  /** YYYY-MM-DD resolved in code from `deadline` + meeting date (src/dates.ts); null if unknown. */
+  dueDate: string | null;
+  line: number;
+  quote: string;
+  notes: string[];
+};
 export type Rejected = { kind: "decision" | "action_item"; text: string; reason: string };
 
 export type VerifiedNotes = {

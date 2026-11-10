@@ -18,7 +18,7 @@ export type MeetingRecord = {
   createdAt: string;
 };
 
-type Row = { id: string; data: string; created_at: string };
+type Row = { id: string; data: string; created_at: string; idempotency_key?: string | null };
 
 export class MeetingStore {
   private db: DatabaseSync;
@@ -29,18 +29,29 @@ export class MeetingStore {
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, title TEXT, data TEXT NOT NULL, created_at TEXT NOT NULL);
     `);
+    // Migration for databases created before idempotency keys existed.
+    const cols = this.db.prepare("PRAGMA table_info(meetings)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "idempotency_key")) this.db.exec("ALTER TABLE meetings ADD COLUMN idempotency_key TEXT");
+    this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS meetings_idempotency_key ON meetings (idempotency_key) WHERE idempotency_key IS NOT NULL");
   }
 
-  insert(m: Omit<MeetingRecord, "id" | "createdAt">): MeetingRecord {
+  insert(m: Omit<MeetingRecord, "id" | "createdAt">, idempotencyKey?: string): MeetingRecord {
     const rec: MeetingRecord = { ...m, id: randomUUID(), createdAt: new Date().toISOString() };
     const { id, createdAt, ...data } = rec;
-    this.db.prepare("INSERT INTO meetings (id, title, data, created_at) VALUES (?, ?, ?, ?)").run(id, rec.title, JSON.stringify(data), createdAt);
+    this.db
+      .prepare("INSERT INTO meetings (id, title, data, created_at, idempotency_key) VALUES (?, ?, ?, ?, ?)")
+      .run(id, rec.title, JSON.stringify(data), createdAt, idempotencyKey ?? null);
     return rec;
   }
 
   get(id: string): MeetingRecord | undefined {
     const row = this.db.prepare("SELECT * FROM meetings WHERE id = ?").get(id) as Row | undefined;
-    return row ? { id: row.id, createdAt: row.created_at, ...(JSON.parse(row.data) as Omit<MeetingRecord, "id" | "createdAt">) } : undefined;
+    return row ? fromRow(row) : undefined;
+  }
+
+  getByIdempotencyKey(key: string): MeetingRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM meetings WHERE idempotency_key = ?").get(key) as Row | undefined;
+    return row ? fromRow(row) : undefined;
   }
 
   list(limit: number) {
@@ -54,3 +65,5 @@ export class MeetingStore {
     this.db.close();
   }
 }
+
+const fromRow = (row: Row): MeetingRecord => ({ id: row.id, createdAt: row.created_at, ...(JSON.parse(row.data) as Omit<MeetingRecord, "id" | "createdAt">) });

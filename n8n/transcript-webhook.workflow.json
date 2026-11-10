@@ -14,8 +14,15 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "meeting-transcript",
+        "authentication": "headerAuth",
         "responseMode": "responseNode",
         "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "",
+          "name": "Meeting API webhook auth"
+        }
       }
     },
     {
@@ -36,6 +43,10 @@
             {
               "name": "x-api-key",
               "value": "={{ $env.MEETING_API_KEY }}"
+            },
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $('Transcript webhook').item.json.headers['idempotency-key'] || 'n8n-webhook-' + $execution.id }}"
             }
           ]
         },
@@ -43,12 +54,13 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.body) }}",
         "options": {
-          "timeout": 300000
+          "timeout": 900000
         }
       },
       "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 10000
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "id": "1cff7e3f-5883-4f05-97a4-0a68fe0ea22d",
@@ -57,7 +69,7 @@
       "typeVersion": 1.1,
       "position": [
         480,
-        -120
+        -160
       ],
       "parameters": {
         "respondWith": "json",
@@ -72,7 +84,7 @@
       "typeVersion": 2.1,
       "position": [
         480,
-        120
+        0
       ],
       "parameters": {
         "resource": "draft",
@@ -80,12 +92,31 @@
         "subject": "={{ $json.meeting.followUp ? $json.meeting.followUp.subject : 'Meeting notes: ' + ($json.meeting.title || 'meeting') }}",
         "emailType": "text",
         "message": "={{ $json.meeting.followUp ? $json.meeting.followUp.body : $json.meeting.notes.summary }}",
-        "options": {}
+        "options": {
+          "sendTo": "={{ ($json.meeting.attendees || []).filter(a => /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(a)).join(', ') }}"
+        }
       },
       "credentials": {
         "gmailOAuth2": {
           "id": "",
           "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "0d6f3c2e-8b1a-4f55-9a0e-6c1d2b7e4a10",
+      "name": "Respond with error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        160
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: { code: 'meeting_api_failed', message: ($json.error && $json.error.message) ? $json.error.message : 'The meeting API request failed after retries.' } }) }}",
+        "options": {
+          "responseCode": 502
         }
       }
     }
@@ -112,6 +143,13 @@
           },
           {
             "node": "Create Gmail draft (review before sending)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond with error",
             "type": "main",
             "index": 0
           }

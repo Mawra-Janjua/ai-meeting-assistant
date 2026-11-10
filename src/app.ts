@@ -9,6 +9,8 @@ export type AppOptions = {
   service: MeetingService;
   store: MeetingStore;
   apiKey?: string;
+  /** Honour X-Forwarded-For for rate limiting. Only behind a trusted reverse proxy. */
+  trustProxy?: boolean;
   rateLimitPerMinute: number;
   maxBodyBytes: number;
   status: { claude: boolean; stt: boolean; model: string };
@@ -17,19 +19,43 @@ export type AppOptions = {
 
 const TEXT_TYPES = ["text/plain", "text/vtt", "application/x-subrip", "text/srt"];
 
+const MetaSchema = MeetingInputSchema.omit({ transcript: true });
+
+/** Metadata from the query string (`?title=&date=&attendees=a,b`). Empty values count as absent. */
+function queryMeta(ctx: Ctx) {
+  const q = (k: string) => ctx.query.get(k)?.trim() || undefined;
+  const attendees = q("attendees");
+  return {
+    title: q("title"),
+    date: q("date"),
+    attendees: attendees ? attendees.split(",").map((a) => a.trim()).filter(Boolean) : undefined,
+  };
+}
+
+const mediaType = (ctx: Ctx) => (ctx.req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+
 /** JSON body, or a raw transcript file (txt / vtt / srt) with metadata in the query string. */
 async function readMeetingInput(ctx: Ctx): Promise<MeetingInput> {
-  const type = (ctx.req.headers["content-type"] ?? "").split(";")[0].trim();
-  if (TEXT_TYPES.includes(type)) {
-    const attendees = ctx.query.get("attendees");
-    return MeetingInputSchema.parse({
-      transcript: (await ctx.rawBody()).toString("utf8"),
-      title: ctx.query.get("title") ?? undefined,
-      date: ctx.query.get("date") ?? undefined,
-      attendees: attendees ? attendees.split(",").map((a) => a.trim()).filter(Boolean) : undefined,
-    });
+  if (TEXT_TYPES.includes(mediaType(ctx))) {
+    return MeetingInputSchema.parse({ transcript: (await ctx.rawBody()).toString("utf8"), ...queryMeta(ctx) });
   }
   return MeetingInputSchema.parse(await ctx.body());
+}
+
+/** Optional `Idempotency-Key` header: a repeated POST returns the stored meeting instead of a duplicate. */
+function idempotencyKey(ctx: Ctx): string | undefined {
+  const raw = ctx.req.headers["idempotency-key"];
+  const key = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  if (!key) return undefined;
+  if (key.length > 200 || !/^[!-~]+$/.test(key)) {
+    throw new HttpError(400, "invalid_idempotency_key", "Idempotency-Key must be 1-200 printable ASCII characters without spaces.");
+  }
+  return key;
+}
+
+function created(ctx: Ctx, r: { meeting: MeetingRecord; replayed: boolean }) {
+  if (r.replayed) ctx.res.setHeader("idempotent-replayed", "true");
+  return { status: r.replayed ? 200 : 201, json: { meeting: present(r.meeting) } };
 }
 
 const followUpFlag = (ctx: Ctx) => ctx.query.get("followUp") !== "false";
@@ -40,7 +66,7 @@ export function present(m: MeetingRecord) {
 }
 
 export function createRouter(o: AppOptions) {
-  const r = new Router({ apiKey: o.apiKey, rateLimitPerMinute: o.rateLimitPerMinute, maxBodyBytes: o.maxBodyBytes, log: o.log });
+  const r = new Router({ apiKey: o.apiKey, trustProxy: o.trustProxy, rateLimitPerMinute: o.rateLimitPerMinute, maxBodyBytes: o.maxBodyBytes, log: o.log });
 
   r.on(
     "GET",
@@ -50,8 +76,17 @@ export function createRouter(o: AppOptions) {
   );
 
   r.on("POST", "/api/meetings", async (ctx) => {
-    const m = await o.service.create(await readMeetingInput(ctx), { followUp: followUpFlag(ctx) });
-    return { status: 201, json: { meeting: present(m) } };
+    const key = idempotencyKey(ctx);
+    return created(ctx, await o.service.createIdempotent(await readMeetingInput(ctx), { followUp: followUpFlag(ctx) }, key));
+  });
+
+  // Audio → speech-to-text → the same summarise + verify pipeline → stored meeting.
+  r.on("POST", "/api/meetings/audio", async (ctx) => {
+    const type = mediaType(ctx);
+    if (!AUDIO_TYPES.includes(type)) throw new HttpError(415, "unsupported_media_type", `Send the audio with one of these Content-Types: ${AUDIO_TYPES.join(", ")}`);
+    const meta = MetaSchema.parse(queryMeta(ctx)); // validate before paying for transcription
+    const key = idempotencyKey(ctx);
+    return created(ctx, await o.service.createFromAudio(await ctx.rawBody(), type, meta, { followUp: followUpFlag(ctx) }, key));
   });
 
   r.on("POST", "/api/analyze", async (ctx) => {
@@ -70,7 +105,7 @@ export function createRouter(o: AppOptions) {
   });
 
   r.on("POST", "/api/transcribe", async (ctx) => {
-    const type = (ctx.req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
+    const type = mediaType(ctx);
     if (!AUDIO_TYPES.includes(type)) throw new HttpError(415, "unsupported_media_type", `Send the audio with one of these Content-Types: ${AUDIO_TYPES.join(", ")}`);
     return { json: await o.service.transcribe(await ctx.rawBody(), type) };
   });

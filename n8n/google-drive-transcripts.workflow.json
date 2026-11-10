@@ -59,7 +59,10 @@
           "id": "",
           "name": "Google Drive account"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "id": "f9637a3d-9f76-47af-86a0-ee72bbdb245f",
@@ -81,6 +84,10 @@
               "value": "={{ $env.MEETING_API_KEY }}"
             },
             {
+              "name": "Idempotency-Key",
+              "value": "=drive-{{ $('New transcript in Drive folder').item.json.id }}"
+            },
+            {
               "name": "content-type",
               "value": "={{ $('New transcript in Drive folder').item.json.name.toLowerCase().endsWith('.vtt') ? 'text/vtt' : ($('New transcript in Drive folder').item.json.name.toLowerCase().endsWith('.srt') ? 'application/x-subrip' : 'text/plain') }}"
             }
@@ -90,9 +97,13 @@
         "contentType": "binaryData",
         "inputDataFieldName": "data",
         "options": {
-          "timeout": 300000
+          "timeout": 900000
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "id": "5b027baa-0ad8-4eaa-ab03-cc400d3b411e",
@@ -101,7 +112,7 @@
       "typeVersion": 2.1,
       "position": [
         720,
-        0
+        -100
       ],
       "parameters": {
         "resource": "draft",
@@ -116,6 +127,20 @@
           "id": "",
           "name": "Gmail account"
         }
+      }
+    },
+    {
+      "id": "9e2b7c41-3d5a-4c8e-b6f0-2a4d8e1c7b93",
+      "name": "Stop: meeting API failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "errorType": "errorMessage",
+        "errorMessage": "={{ 'Meeting API failed for ' + $('New transcript in Drive folder').item.json.name + ': ' + (($json.error && $json.error.message) ? $json.error.message : 'unknown error') }}"
       }
     }
   ],
@@ -147,6 +172,13 @@
         [
           {
             "node": "Create Gmail draft (review before sending)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: meeting API failed",
             "type": "main",
             "index": 0
           }

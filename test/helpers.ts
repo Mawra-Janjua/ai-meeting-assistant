@@ -39,6 +39,7 @@ export class StubMeetingAI implements MeetingAI {
   notesToReturn: Notes = productSyncNotes();
   received: string[] = [];
   followUpInput?: VerifiedNotes;
+  followUpCalls = 0;
   fail?: Error;
   async notes(numberedTranscript: string, _meta: MeetingMeta) {
     if (this.fail) throw this.fail;
@@ -47,6 +48,7 @@ export class StubMeetingAI implements MeetingAI {
   }
   async followUp(notes: VerifiedNotes): Promise<FollowUp> {
     this.followUpInput = notes;
+    this.followUpCalls++;
     return { subject: "Follow-up: product sync", body: notes.actionItems.map((a) => `- ${a.task} (Owner: ${a.owner ?? "TBD"})`).join("\n") };
   }
 }
@@ -64,9 +66,9 @@ export function makeService(opts: { ai?: StubMeetingAI | null; stt?: SpeechToTex
   return { store, ai, service };
 }
 
-export async function startApp(opts: { apiKey?: string; ai?: StubMeetingAI | null; stt?: SpeechToText | null } = {}) {
+export async function startApp(opts: { apiKey?: string; ai?: StubMeetingAI | null; stt?: SpeechToText | null; trustProxy?: boolean; rateLimitPerMinute?: number } = {}) {
   const { store, ai, service } = makeService(opts);
-  const router = createRouter({ service, store, apiKey: opts.apiKey, rateLimitPerMinute: 1000, maxBodyBytes: 1024 * 1024, status: { claude: ai !== null, stt: !!opts.stt, model: "test" } });
+  const router = createRouter({ service, store, apiKey: opts.apiKey, trustProxy: opts.trustProxy, rateLimitPerMinute: opts.rateLimitPerMinute ?? 1000, maxBodyBytes: 1024 * 1024, status: { claude: ai !== null, stt: !!opts.stt, model: "test" } });
   const server = createServer(router.handle);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, store, ai, close: () => closeServer(server) };

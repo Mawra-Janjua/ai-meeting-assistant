@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeService, StubSTT, transcriptFixture } from "./helpers.ts";
 import { toMarkdown } from "../src/export.ts";
+import { MeetingStore } from "../src/store.ts";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("create: parses, sends numbered lines to the AI, verifies, drafts follow-up from verified notes only", async () => {
   const { service, ai, store } = makeService();
@@ -53,4 +58,58 @@ test("markdown export: decisions with sources, unassigned owners, removed items,
   const empty = toMarkdown({ title: null, date: null, attendees: [], speakers: [] }, { summary: "x", keyPoints: [], decisions: [], actionItems: [], openQuestions: [], rejected: [] }, null);
   assert.match(empty, /_No decisions were recorded\._/);
   assert.match(empty, /_No action items were recorded\._/);
+});
+
+test("no follow-up AI call when there is nothing to follow up on", async () => {
+  const { service, ai } = makeService();
+  ai!.notesToReturn = { summary: "Ideas only, nothing decided.", key_points: ["Chatbot idea"], decisions: [], action_items: [], open_questions: [] };
+  const m = await service.create({ transcript: transcriptFixture("brainstorm.srt") }, { followUp: true });
+  assert.equal(m.followUp, null);
+  assert.equal(ai!.followUpCalls, 0, "only the notes call was made");
+  ai!.notesToReturn = { ...ai!.notesToReturn, open_questions: ["Do we have data on pricing-page chats?"] };
+  await service.create({ transcript: transcriptFixture("brainstorm.srt") }, { followUp: true });
+  assert.equal(ai!.followUpCalls, 1, "open questions are worth a follow-up");
+});
+
+test("due dates reach the stored notes, the follow-up input and the Markdown export", async () => {
+  const { service, ai } = makeService();
+  const m = await service.create({ date: "2026-11-09", transcript: transcriptFixture("product-sync.txt") }, { followUp: true });
+  const fix = m.notes.actionItems.find((a) => a.task === "Fix the CSV export bug")!;
+  assert.deepEqual([fix.deadline, fix.dueDate], ["Thursday", "2026-11-12"]);
+  assert.equal(ai!.followUpInput!.actionItems.find((a) => a.task === fix.task)!.dueDate, "2026-11-12");
+  assert.match(toMarkdown(m, m.notes, m.followUp), /\| Fix the CSV export bug \| Daniel \| Thursday \(2026-11-12\) \| L2 \|/);
+});
+
+test("idempotency key: a repeat (sequential or concurrent) returns the stored meeting without new AI calls", async () => {
+  const { service, ai, store } = makeService();
+  const input = { transcript: transcriptFixture("product-sync.txt") };
+  const [a, b] = await Promise.all([service.createIdempotent(input, { followUp: false }, "drive-file-1"), service.createIdempotent(input, { followUp: false }, "drive-file-1")]);
+  assert.equal(a.meeting.id, b.meeting.id);
+  assert.deepEqual([a.replayed, b.replayed], [false, true]);
+  const c = await service.createIdempotent(input, { followUp: false }, "drive-file-1");
+  assert.equal(c.meeting.id, a.meeting.id);
+  assert.equal(c.replayed, true);
+  assert.equal(ai!.received.length, 1, "Claude was called once");
+  assert.equal(store.list(10).length, 1);
+  await assert.rejects(
+    service.createIdempotent({ transcript: transcriptFixture("standup.vtt") }, { followUp: false }, "drive-file-1"),
+    (e: Error & { code?: string }) => e.code === "idempotency_key_reused",
+  );
+  await service.createIdempotent(input, { followUp: false });
+  assert.equal(store.list(10).length, 2, "no key → no deduplication");
+});
+
+test("store migrates an existing database without the idempotency column", () => {
+  const dir = mkdtempSync(join(tmpdir(), "meet-"));
+  try {
+    const path = join(dir, "old.db");
+    const old = new DatabaseSync(path);
+    old.exec("CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT, data TEXT NOT NULL, created_at TEXT NOT NULL)");
+    old.close();
+    const store = new MeetingStore(path);
+    assert.equal(store.getByIdempotencyKey("x"), undefined);
+    store.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

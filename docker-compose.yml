@@ -5,6 +5,8 @@ services:
     env_file: .env
     environment:
       DATABASE_PATH: /app/data/meetings.db
+      # Container must listen on all interfaces; API_KEY (from .env) is then required.
+      HOST: 0.0.0.0
     ports:
       - "4104:4104"
     volumes:

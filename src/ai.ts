@@ -21,6 +21,7 @@ Strict rules:
 
 const FOLLOWUP_SYSTEM = `You write a concise follow-up email after a meeting, for a human to review before sending.
 Use only the verified notes provided. Do not add decisions, tasks, owners or dates that are not in them. Unassigned items must be shown as "Owner: TBD".
+When an action item has a due_date (YYYY-MM-DD, computed from the spoken deadline), show the deadline as said followed by the date, e.g. "by Friday (2026-11-13)". Never compute or change dates yourself.
 Plain text, short paragraphs and simple "-" bullet lists, no markdown headings. No signature block.`;
 
 export class ClaudeMeetingAI implements MeetingAI {
@@ -51,7 +52,7 @@ export class ClaudeMeetingAI implements MeetingAI {
       date: meta.date ?? null,
       summary: notes.summary,
       decisions: notes.decisions.map((d) => d.decision),
-      action_items: notes.actionItems.map((a) => ({ task: a.task, owner: a.owner ?? "TBD", deadline: a.deadline })),
+      action_items: notes.actionItems.map((a) => ({ task: a.task, owner: a.owner ?? "TBD", deadline: a.deadline, due_date: a.dueDate })),
       open_questions: notes.openQuestions,
     };
     const { data } = await this.claude.structured({

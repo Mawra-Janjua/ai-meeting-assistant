@@ -1,15 +1,20 @@
 // Checks every decision and action item against the transcript.
 // - The cited quote must really be in the transcript (else the item is rejected).
 // - An owner must be named in the cited line's context (speaker or text); otherwise owner = null.
-// - A deadline must be said in that context; otherwise deadline = null.
+// - A deadline must be said in that context (whole words); otherwise deadline = null.
+// - The item's own text must share key words with the cited line (± one line), so a
+//   real quote cannot "support" an unrelated, invented decision or task.
 import { normalize, type Transcript } from "./transcript.ts";
+import { resolveDueDate } from "./dates.ts";
 import type { Notes, Rejected, VerifiedAction, VerifiedDecision, VerifiedNotes } from "./schemas.ts";
 
 const CONTEXT = 2; // lines either side of the cited line
+/** Minimum normalised quote length: shorter quotes ("yes", "ok then") match almost anywhere. */
+export const MIN_QUOTE_CHARS = 12;
 
 function locateQuote(t: Transcript, line: number, quote: string): number | null {
   const q = normalize(quote);
-  if (q.length < 3) return null;
+  if (q.length < MIN_QUOTE_CHARS) return null;
   const inLine = (n: number) => {
     const l = t.lines[n - 1];
     return l ? normalize(l.text).includes(q) : false;
@@ -63,20 +68,66 @@ export function verifyOwner(t: Transcript, line: number, owner: string | null, a
   return null;
 }
 
+/** Date words that are also ordinary English words ("you may…", "march on", "the sun"). */
+const AMBIGUOUS_DATE_WORDS = new Set(["may", "march", "sat", "sun", "wed", "mon", "jan", "dec", "aug"]);
+
+/**
+ * Whole-word, case-insensitive match in the cited line's context: "Mon" does not match "money".
+ * A deadline that is only an ambiguous word ("May") must also appear capitalised, so the verb
+ * "may" does not count as the month.
+ */
 export function verifyDeadline(t: Transcript, line: number, deadline: string | null): string | null {
   if (!deadline) return null;
   const d = normalize(deadline);
   if (!d) return null;
-  return context(t, line).some((l) => normalize(l.text).includes(d)) ? deadline : null;
+  const ambiguous = AMBIGUOUS_DATE_WORDS.has(d);
+  const capitalised = new RegExp(`(^|[^\\p{L}])${d[0].toUpperCase()}${d.slice(1)}([^\\p{L}]|$)`, "u");
+  return context(t, line).some((l) => words(l.text).includes(` ${d} `) && (!ambiguous || capitalised.test(l.text))) ? deadline : null;
 }
 
-export function verifyNotes(notes: Notes, t: Transcript, attendees: string[] = []): VerifiedNotes {
+const STOPWORDS = new Set(
+  ("about above after again also been before being below between both could does doing down during each from further have having here " +
+    "into just more most need needs once only other over same should some such than that their them then there these they this those " +
+    "through under until very were what when where which while will with would your yours ours okay yeah sure maybe really think going " +
+    "make sure something someone everyone team meeting today tomorrow week let's lets agree agreed decide decided decision task item").split(" "),
+);
+
+/** Light stemming so "drafted" ~ "drafts" ~ "draft" and "shipping" ~ "ship". */
+function stem(w: string) {
+  for (const suf of ["ing", "ed", "es", "s"]) if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length);
+  return w;
+}
+
+/** Content words: 4+ letters (or containing a digit, e.g. "14th"), minus stopwords, stemmed. */
+export function contentWords(s: string) {
+  return new Set(
+    normalize(s)
+      .split(" ")
+      .map((w) => w.replace(/'s$/, "").replace(/'/g, ""))
+      .filter((w) => (w.length >= 4 || /\d/.test(w)) && !STOPWORDS.has(w))
+      .map(stem),
+  );
+}
+
+/** True when the item text shares at least one content word with the quote or the cited line ± 1. */
+export function supportsText(t: Transcript, line: number, quote: string, text: string): boolean {
+  const item = contentWords(text);
+  if (item.size === 0) return true; // nothing checkable (e.g. "Go") — the quote check already passed
+  const source = new Set([quote, ...t.lines.slice(Math.max(0, line - 2), line + 1).map((l) => l.text)].flatMap((s) => [...contentWords(s)]));
+  for (const w of item) if (source.has(w)) return true;
+  return false;
+}
+
+const UNRELATED = "Text shares no key words with the cited line — the quote does not support it";
+
+export function verifyNotes(notes: Notes, t: Transcript, attendees: string[] = [], meetingDate?: string | null): VerifiedNotes {
   const rejected: Rejected[] = [];
 
   const decisions: VerifiedDecision[] = [];
   for (const d of notes.decisions) {
     const line = locateQuote(t, d.evidence_line, d.evidence_quote);
     if (line === null) rejected.push({ kind: "decision", text: d.decision, reason: "Cited quote not found in the transcript" });
+    else if (!supportsText(t, line, d.evidence_quote, d.decision)) rejected.push({ kind: "decision", text: d.decision, reason: UNRELATED });
     else decisions.push({ decision: d.decision, line, quote: d.evidence_quote });
   }
 
@@ -88,6 +139,10 @@ export function verifyNotes(notes: Notes, t: Transcript, attendees: string[] = [
       rejected.push({ kind: "action_item", text: a.task, reason: "Cited quote not found in the transcript" });
       continue;
     }
+    if (!supportsText(t, line, a.evidence_quote, a.task)) {
+      rejected.push({ kind: "action_item", text: a.task, reason: UNRELATED });
+      continue;
+    }
     const key = normalize(a.task);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -96,7 +151,7 @@ export function verifyNotes(notes: Notes, t: Transcript, attendees: string[] = [
     const itemNotes: string[] = [];
     if (a.owner && !owner) itemNotes.push(`Owner "${a.owner}" is not stated near the cited line — left unassigned.`);
     if (a.deadline && !deadline) itemNotes.push(`Deadline "${a.deadline}" is not stated near the cited line — removed.`);
-    actionItems.push({ task: a.task, owner, deadline, line, quote: a.evidence_quote, notes: itemNotes });
+    actionItems.push({ task: a.task, owner, deadline, dueDate: resolveDueDate(deadline, meetingDate), line, quote: a.evidence_quote, notes: itemNotes });
   }
 
   return { summary: notes.summary, keyPoints: notes.key_points, decisions, actionItems, openQuestions: notes.open_questions, rejected };

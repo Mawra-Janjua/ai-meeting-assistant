@@ -61,3 +61,62 @@ test("a meeting with no decisions yields empty lists", () => {
   const v = verifyNotes({ summary: "Ideas only.", key_points: [], decisions: [], action_items: [], open_questions: [] }, parseTranscript(transcriptFixture("brainstorm.srt")));
   assert.deepEqual([v.decisions, v.actionItems, v.rejected], [[], [], []]);
 });
+
+test("verifyDeadline matches whole words only, case-insensitively", () => {
+  const money = parseTranscript("Ali: We need more money for the launch.\nSara: I'll send the budget.");
+  assert.equal(verifyDeadline(money, 2, "Mon"), null, "'Mon' is not in 'money'");
+  const may = parseTranscript("Ali: You may want to check the numbers.\nSara: I'll check them.");
+  assert.equal(verifyDeadline(may, 2, "May"), null, "the verb 'may' is not the month");
+  const real = parseTranscript("Ali: Can you send it by MAY 3?\nSara: Yes, I'll send it.");
+  assert.equal(verifyDeadline(real, 2, "May 3"), "May 3");
+  const month = parseTranscript("Ali: Let's launch it in May.\nSara: I'll prepare the launch.");
+  assert.equal(verifyDeadline(month, 2, "May"), "May", "capitalised month in context");
+  assert.equal(verifyDeadline(t, 8, "by monday"), "by monday");
+  assert.equal(verifyDeadline(t, 2, "thurs"), null, "partial word");
+});
+
+test("decision/task text must share key words with the cited line", () => {
+  const notes = {
+    summary: "s",
+    key_points: [],
+    decisions: [
+      // Real quote, invented decision.
+      { decision: "Double the marketing budget for Q3", evidence_line: 3, evidence_quote: "we ship the fix as a hotfix" },
+      { decision: "Release the export fix as a hotfix", evidence_line: 3, evidence_quote: "we ship the fix as a hotfix" },
+    ],
+    action_items: [
+      { task: "Hire two contractors", owner: null, deadline: null, evidence_line: 8, evidence_quote: "send the drafts to the team" },
+      // Paraphrase: "draft" ~ "drafts", "comment" ~ "comments".
+      { task: "Share draft emails for comment", owner: "Ayesha", deadline: "by Monday", evidence_line: 8, evidence_quote: "send the drafts to the team" },
+    ],
+    open_questions: [],
+  };
+  const v = verifyNotes(notes, t);
+  assert.deepEqual(v.decisions.map((d) => d.decision), ["Release the export fix as a hotfix"]);
+  assert.deepEqual(v.actionItems.map((a) => a.task), ["Share draft emails for comment"]);
+  assert.deepEqual(v.rejected.map((r) => r.text), ["Double the marketing budget for Q3", "Hire two contractors"]);
+  assert.match(v.rejected[0].reason, /no key words/);
+});
+
+test("quotes shorter than the minimum are rejected", () => {
+  const notes = {
+    summary: "s",
+    key_points: [],
+    decisions: [{ decision: "Hotfix it", evidence_line: 5, evidence_quote: "hotfix" }],
+    action_items: [{ task: "Update status page", owner: null, deadline: null, evidence_line: 12, evidence_quote: "will do" }],
+    open_questions: [],
+  };
+  const v = verifyNotes(notes, t);
+  assert.equal(v.decisions.length + v.actionItems.length, 0);
+  assert.equal(v.rejected.length, 2);
+});
+
+test("due dates are resolved in code from verified deadlines and the meeting date", () => {
+  const v = verifyNotes(productSyncNotes(), t, [], "2026-11-09");
+  const byTask = Object.fromEntries(v.actionItems.map((a) => [a.task, a]));
+  assert.equal(byTask["Fix the CSV export bug"].deadline, "Thursday", "spoken text is kept");
+  assert.equal(byTask["Fix the CSV export bug"].dueDate, "2026-11-12");
+  assert.equal(byTask["Send onboarding drafts to the team for comments"].dueDate, "2026-11-09");
+  assert.equal(byTask["Check legal wording on trial terms"].dueDate, null, "removed deadline → no due date");
+  assert.ok(verifyNotes(productSyncNotes(), t).actionItems.every((a) => a.dueDate === null), "no meeting date → null");
+});

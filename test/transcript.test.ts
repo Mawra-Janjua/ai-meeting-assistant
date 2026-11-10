@@ -45,3 +45,33 @@ test("sentences with a colon are not mistaken for speakers", () => {
 test("normalize makes quotes comparable", () => {
   assert.equal(normalize("  I’ll   send it — by MONDAY!! "), "i'll send it by monday");
 });
+
+test("Teams/Zoom layout: speaker name on its own line (with or without timestamps)", () => {
+  const teams = parseTranscript("Sarah Khan   0:03\nThanks for joining.\nDaniel   0:10\nI can have the fix ready by Thursday.\nIt is the date filter.\nSarah Khan   0:15\nOkay\nGreat.");
+  assert.deepEqual(teams.speakers, ["Sarah Khan", "Daniel"]);
+  assert.deepEqual(teams.lines.map((l) => `${l.speaker}|${l.text}`), [
+    "Sarah Khan|Thanks for joining.",
+    "Daniel|I can have the fix ready by Thursday.",
+    "Daniel|It is the date filter.",
+    "Sarah Khan|Okay",
+    "Sarah Khan|Great.",
+  ]);
+  assert.equal(teams.lines[1].time, "0:10");
+  const zoom = parseTranscript("[Sarah Khan] 10:02:33\nHello all\n[Daniel] 10:02:40\nHi");
+  assert.deepEqual(zoom.lines.map((l) => `${l.speaker}|${l.text}|${l.time}`), ["Sarah Khan|Hello all|10:02:33", "Daniel|Hi|10:02:40"]);
+  const bare = parseTranscript("Sarah Khan\nThanks for joining.\nDaniel\nI'll fix it.\nSarah Khan\nAgreed.\nDaniel\nOkay");
+  assert.deepEqual(bare.lines.map((l) => `${l.speaker}|${l.text}`), ["Sarah Khan|Thanks for joining.", "Daniel|I'll fix it.", "Sarah Khan|Agreed.", "Daniel|Okay"]);
+  // Ordinary prose with short Title-Case lines is not reinterpreted.
+  const prose = parseTranscript("Budget\nWe should decide on the budget.\nTimeline\nIt is due next week.");
+  assert.ok(prose.lines.every((l) => l.speaker === null));
+});
+
+test("a VTT cue with several <v> voices is split per speaker", () => {
+  const t = parseTranscript("WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\n<v Tom>Hi there.</v> <v Priya>Hello Tom.</v>\n\n2\n00:00:03.000 --> 00:00:05.000\n<v.loud Tom>First</v>\n<v Priya>Second");
+  assert.deepEqual(t.lines.map((l) => `${l.speaker}|${l.text}|${l.time}`), [
+    "Tom|Hi there.|00:00:01.000",
+    "Priya|Hello Tom.|00:00:01.000",
+    "Tom|First|00:00:03.000",
+    "Priya|Second|00:00:03.000",
+  ]);
+});

@@ -47,12 +47,14 @@ test("follow-up request contains only verified items with TBD owners", async () 
   try {
     const ai = new ClaudeMeetingAI(new ClaudeClient({ apiKey: "k", model: "claude-opus-5-5", fallbacks: "off", baseURL: api.baseURL }));
     await ai.followUp(
-      { summary: "S", keyPoints: [], decisions: [], actionItems: [{ task: "Legal review", owner: null, deadline: null, line: 6, quote: "q", notes: [] }], openQuestions: [], rejected: [{ kind: "action_item", text: "Book venue", reason: "x" }] },
+      { summary: "S", keyPoints: [], decisions: [], actionItems: [{ task: "Legal review", owner: null, deadline: "by Friday", dueDate: "2026-11-13", line: 6, quote: "q", notes: [] }], openQuestions: [], rejected: [{ kind: "action_item", text: "Book venue", reason: "x" }] },
       {},
       "Mawra",
     );
     const content = api.bodies[0].messages[0].content as string;
     assert.match(content, /"owner": "TBD"/);
+    assert.match(content, /"deadline": "by Friday",\s+"due_date": "2026-11-13"/, "spoken deadline and code-resolved date");
+    assert.match(api.bodies[0].system, /Never compute or change dates yourself/);
     assert.doesNotMatch(content, /Book venue/, "rejected items are never sent to the email writer");
     assert.equal(api.bodies[0].output_config.effort, "low");
   } finally {

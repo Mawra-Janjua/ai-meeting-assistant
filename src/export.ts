@@ -23,7 +23,7 @@ export function toMarkdown(meta: Meta, n: VerifiedNotes, followUp: FollowUp | nu
   if (n.actionItems.length) {
     out.push("| Task | Owner | Deadline | Source |", "|---|---|---|---|");
     for (const a of n.actionItems) {
-      out.push(`| ${esc(a.task)} | ${a.owner ? esc(a.owner) : "_Unassigned_"} | ${a.deadline ? esc(a.deadline) : "—"} | L${a.line} |`);
+      out.push(`| ${esc(a.task)} | ${a.owner ? esc(a.owner) : "_Unassigned_"} | ${a.deadline ? esc(a.deadline) + (a.dueDate ? ` (${a.dueDate})` : "") : "—"} | L${a.line} |`);
     }
   } else out.push("_No action items were recorded._");
   out.push("");

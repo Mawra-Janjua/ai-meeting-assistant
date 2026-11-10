@@ -36,8 +36,13 @@ export class DeepgramSTT implements SpeechToText {
     if (res.status === 401 || res.status === 403) throw new HttpError(502, "stt_auth_failed", "Deepgram rejected the API key (DEEPGRAM_API_KEY).");
     if (res.status === 429) throw new HttpError(503, "stt_rate_limited", "Deepgram rate limit reached. Retry shortly.");
     if (!res.ok) throw new HttpError(502, "stt_error", `Deepgram returned HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
-    const json = (await res.json()) as { metadata?: { duration?: number }; results?: { utterances?: Utterance[] } };
-    return formatUtterances(json.results?.utterances ?? [], json.metadata?.duration ?? null);
+    let json: { metadata?: { duration?: number }; results?: { utterances?: Utterance[] } };
+    try {
+      json = (await res.json()) as typeof json;
+    } catch {
+      throw new HttpError(502, "stt_invalid_response", "Deepgram returned a response that is not valid JSON.");
+    }
+    return formatUtterances(json?.results?.utterances ?? [], json?.metadata?.duration ?? null);
   }
 }
 
