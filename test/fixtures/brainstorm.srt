@@ -1,0 +1,11 @@
+1
+00:00:00,500 --> 00:00:04,000
+Speaker 1: What if we added a chatbot to the pricing page?
+
+2
+00:00:04,100 --> 00:00:08,900
+Speaker 2: Could be interesting, but I'd want to see data first.
+
+3
+00:00:09,000 --> 00:00:12,000
+Speaker 1: Fair. Just throwing ideas around today.

@@ -1,0 +1,32 @@
+# Usage: cp .env.example .env && docker compose up -d --build
+services:
+  meeting-api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_PATH: /app/data/meetings.db
+    ports:
+      - "4104:4104"
+    volumes:
+      - meeting-data:/app/data
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      MEETING_API_URL: http://meeting-api:4104
+      MEETING_API_KEY: ${API_KEY}
+      TRANSCRIPTS_FOLDER_ID: ${TRANSCRIPTS_FOLDER_ID:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    depends_on:
+      - meeting-api
+    restart: unless-stopped
+
+volumes:
+  meeting-data:
+  n8n-data:

@@ -1,0 +1,161 @@
+{
+  "name": "AI Meeting Assistant - Google Drive transcripts folder",
+  "nodes": [
+    {
+      "id": "a85599ed-5942-41fa-81dc-cf12e3753cbe",
+      "name": "New transcript in Drive folder",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 10,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.TRANSCRIPTS_FOLDER_ID }}"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "c7255a20-cd31-447b-b4ea-a425f1777ae2",
+      "name": "Download transcript",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "id": "f9637a3d-9f76-47af-86a0-ee72bbdb245f",
+      "name": "Summarise meeting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MEETING_API_URL }}/api/meetings?title={{ encodeURIComponent($('New transcript in Drive folder').item.json.name) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.MEETING_API_KEY }}"
+            },
+            {
+              "name": "content-type",
+              "value": "={{ $('New transcript in Drive folder').item.json.name.toLowerCase().endsWith('.vtt') ? 'text/vtt' : ($('New transcript in Drive folder').item.json.name.toLowerCase().endsWith('.srt') ? 'application/x-subrip' : 'text/plain') }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000
+        }
+      }
+    },
+    {
+      "id": "5b027baa-0ad8-4eaa-ab03-cc400d3b411e",
+      "name": "Create Gmail draft (review before sending)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.meeting.followUp ? $json.meeting.followUp.subject : 'Meeting notes: ' + ($json.meeting.title || 'meeting') }}",
+        "emailType": "text",
+        "message": "={{ $json.meeting.followUp ? $json.meeting.followUp.body : $json.meeting.notes.summary }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "New transcript in Drive folder": {
+      "main": [
+        [
+          {
+            "node": "Download transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download transcript": {
+      "main": [
+        [
+          {
+            "node": "Summarise meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarise meeting": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail draft (review before sending)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

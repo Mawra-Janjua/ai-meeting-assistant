@@ -1,0 +1,23 @@
+WEBVTT
+
+NOTE Recorded standup, fictional participants
+
+1
+00:00:01.000 --> 00:00:05.500
+<v Priya>Morning. Yesterday I finished the invoice parser tests.</v>
+
+2
+00:00:05.600 --> 00:00:11.200
+<v Tom>I'm blocked on the staging database credentials.</v>
+
+3
+00:00:11.300 --> 00:00:16.000
+<v Priya>Tom, I'll share the staging credentials with you right after this call.</v>
+
+4
+00:00:16.100 --> 00:00:21.000
+<v Tom>Thanks. Then we keep the release date of the 14th as planned.</v>
+
+5
+00:00:21.100 --> 00:00:24.000
+<v Priya>Yes, we keep the 14th.</v>

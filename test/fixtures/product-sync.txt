@@ -1,0 +1,12 @@
+Sarah Khan: Thanks for joining. Two things today: the CSV export bug and the onboarding email sequence.
+Daniel: The export bug is caused by the new date filter. I can have a fix ready by Thursday.
+Sarah Khan: Great. Let's agree that we ship the fix as a hotfix rather than waiting for the next release.
+Ayesha: Agreed, hotfix makes sense.
+Daniel: Okay, hotfix it is.
+Ayesha: On onboarding, I drafted three emails. We still need someone to check the legal wording on the trial terms.
+Sarah Khan: I don't know who owns legal review at the moment. Let's find out before we send anything.
+Ayesha: I'll send the drafts to the team for comments by Monday.
+Sarah Khan: Should we also translate the emails into German?
+Daniel: Not sure yet, depends on the numbers from the German pilot.
+Sarah Khan: Fine, we'll revisit translation later. Daniel, can you also update the status page once the hotfix is live?
+Daniel: Sure, will do.

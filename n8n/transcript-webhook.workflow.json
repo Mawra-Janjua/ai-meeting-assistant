@@ -1,0 +1,126 @@
+{
+  "name": "AI Meeting Assistant - transcript webhook to Gmail draft",
+  "nodes": [
+    {
+      "id": "a3b314d6-6294-46ca-bbd8-8d728c82909b",
+      "name": "Transcript webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "716ae5d4-5e15-4918-ab19-979b15d27529",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "meeting-transcript",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "55936a49-7e07-4ba5-a818-f66e46d9b88a",
+      "name": "Summarise meeting",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MEETING_API_URL }}/api/meetings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.MEETING_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 10000
+    },
+    {
+      "id": "1cff7e3f-5883-4f05-97a4-0a68fe0ea22d",
+      "name": "Respond with notes",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        -120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.meeting) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "a55952c1-5703-4fce-a43d-96c09e219044",
+      "name": "Create Gmail draft (review before sending)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        120
+      ],
+      "parameters": {
+        "resource": "draft",
+        "operation": "create",
+        "subject": "={{ $json.meeting.followUp ? $json.meeting.followUp.subject : 'Meeting notes: ' + ($json.meeting.title || 'meeting') }}",
+        "emailType": "text",
+        "message": "={{ $json.meeting.followUp ? $json.meeting.followUp.body : $json.meeting.notes.summary }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Transcript webhook": {
+      "main": [
+        [
+          {
+            "node": "Summarise meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarise meeting": {
+      "main": [
+        [
+          {
+            "node": "Respond with notes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Gmail draft (review before sending)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
